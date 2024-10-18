@@ -20,11 +20,11 @@ int main(int argc, char **argv){
     // terminal input
     int opt;
     char* filename;
-    int alpha = 0, percentage = 0, betha = 0, threads = 0;
+    int alpha = 0, percentage = 0, betha = 0, levelOneThreads = 0, levelTwoThreads = 0;
 
 
     // get options
-    while ((opt = getopt(argc, argv, "f:a:r:b:T:")) != -1)
+    while ((opt = getopt(argc, argv, "f:a:r:b:u:d:")) != -1)
     {
         switch(opt){
             case 'f':
@@ -39,14 +39,16 @@ int main(int argc, char **argv){
             case 'b':
                 betha = std::atoi(optarg);
                 break;
-            case 'T':
-                threads = std::atoi(optarg);
+            case 'u':
+                levelOneThreads = std::atoi(optarg);
                 break;
+            case 'd':
+                levelTwoThreads = std::atoi(optarg);
             case '?':
                 std::cerr << "Unknown option: " << char(optopt) << std::endl;
                 return 1;
             default: 
-                std::cerr << "Use: " << argv[0] << " -f <filename> -a <minimun alpha> -r <relative vote> -b <number of bethas> -T <number of threads>" << std::endl;
+                std::cerr << "Use: " << argv[0] << " -f <filename> -a <minimun alpha> -r <relative vote> -b <number of bethas> -u <number of threads 1> -d <number of threads 2>" << std::endl;
         }
 
         printf("%d", alpha);
