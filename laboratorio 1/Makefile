@@ -2,10 +2,10 @@
 CXX = g++
 
 # Flags de compilación
-CXXFLAGS = -Wall -g
+CXXFLAGS = -Wall -O2 -fopenmp
 
 # Librerías necesarias
-LIBS = -lcfitsio
+LIBS = -lcfitsio -lm
 
 # Objetivo
 TARGET = main
