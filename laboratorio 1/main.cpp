@@ -4,6 +4,7 @@
 #include <cmath> 
 #include <omp.h>
 #include <fitsio.h>
+#include <vector>
 
 using namespace std;
 
@@ -60,29 +61,31 @@ int main(int argc, char **argv) {
     long fpixel = 1, naxis = 2;
     long naxes[2];
 
-    // Abrir el archivo FITS
+    // Open fits file
     if (fits_open_file(&fptr, filename, READONLY, &status)) {
         fits_report_error(stderr, status);
         return status;
     }
 
-    // Obtener el tamaño de la imagen
+    // Get image size
     if (fits_get_img_size(fptr, 2, naxes, &status)) {
         fits_report_error(stderr, status);
         fits_close_file(fptr, &status);
         return status;
     }
 
-    // Asignar memoria para la imagen
+    // Memory for image
     double *image = (double *) malloc(naxes[0] * naxes[1] * sizeof(double));
     if (image == nullptr) {
         cerr << "Error al asignar memoria para la imagen." << endl;
         fits_close_file(fptr, &status);
         return 1;
     }
+ 
+    // Vector that will contain every index of a 
+    vector<long> pixels;
 
-    // Leer la imagen en paralelo
-    #pragma omp parallel num_threads(levelOneThreads) shared(image, status, naxes, fptr)
+    #pragma omp parallel num_threads(levelOneThreads) shared(image, naxes, fptr, pixels)
     {
         int thread_id = omp_get_thread_num();
         long totalPixels = naxes[0] * naxes[1];
@@ -91,10 +94,23 @@ int main(int argc, char **argv) {
         long end = min(start + pixelsPerThread - 1, totalPixels);
         long pixelsRead = end - start + 1;
 
-        int local_status = 0; // Uso de variable local para evitar problemas de concurrencia con `status`
+        int local_status = 0; 
         fits_read_img(fptr, TDOUBLE, start, pixelsRead, NULL, &image[start - 1], NULL, &local_status);
-            
+
+        vector<long> localPixels;
+
+        for(int i = start - 1; i < end; i++){
+            if(image[i] == 255){
+                localPixels.push_back(i);
+            }
+        }
+
+        #pragma omp critical
+        pixels.insert(pixels.end(), localPixels.begin(), localPixels.end());
+
     }
+    
+    cout << pixels.size() << endl;
 
     // Cerrar el archivo FITS
     if (fits_close_file(fptr, &status)) {
@@ -104,11 +120,16 @@ int main(int argc, char **argv) {
     }
 
     // Imprimir cada pixel de la imagen
-    #pragma omp parallel for num_threads(levelOneThreads)
+    double num = 0;
+    #pragma omp parallel for num_threads(levelOneThreads) shared(num)
     for (long i = 0; i < naxes[0] * naxes[1]; i++) {
         #pragma omp critical
-        cout << "Pixel " << i << ": " << image[i] << endl;
+        if(image[i] == 255){
+            // cout << "Pixel " << i << ": " << image[i] << endl;    
+            num = num + 1;
+        }
     }
+    cout << num << endl;
 
     // Liberar la memoria
     free(image);
