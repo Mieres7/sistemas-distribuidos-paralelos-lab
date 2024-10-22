@@ -8,11 +8,20 @@
 
 using namespace std;
 
+
+typedef struct Ellipse {
+    float ox;
+    float xy;
+    float alpha;
+    float betha;
+    float tetha;
+};
+
 // Data functions
-float ox(int tx, int ux) { return (tx + ux) / 2.0f; }
-float ux(int ty, int uy) { return (ty + uy) / 2.0f; }
-float alpha(int tx, int ty, int ux, int uy) { return sqrt(pow((ux - tx), 2) + pow((uy - ty), 2)) / 2.0f; }
-float theta(int tx, int ty, int ux, int uy) { return atan2((uy - ty), (ux - tx)); }
+float getOx(int tx, int ux) { return (tx + ux) / 2.0f; }
+float getOy(int ty, int uy) { return (ty + uy) / 2.0f; }
+float getAlpha(int tx, int ty, int ux, int uy) { return (sqrt(pow((ux - tx), 2) + pow((uy - ty), 2)) / 2.0f); }
+float getTheta(int tx, int ty, int ux, int uy) { return atan2((uy - ty),(ux - tx)); }
 
 int main(int argc, char **argv) {
 
@@ -81,57 +90,83 @@ int main(int argc, char **argv) {
         fits_close_file(fptr, &status);
         return 1;
     }
+
+    fits_read_img(fptr, TDOUBLE, fpixel, naxes[0]*naxes[1], NULL, image, NULL, &status);
  
-    // Vector that will contain every index of a 
-    vector<long> pixels;
+    // Vector that will contain every pixel with a value o 255, x and y are coordinates
+    vector<pair<int,int>> pixels;
 
+    // Vector with found ellipses
+    vector<Ellipse> ellipses;
+
+    // First parallel level - create edge list 
+    omp_set_nested(0);
     #pragma omp parallel num_threads(levelOneThreads) shared(image, naxes, fptr, pixels)
-    {
-        int thread_id = omp_get_thread_num();
-        long totalPixels = naxes[0] * naxes[1];
-        long pixelsPerThread = (totalPixels + levelOneThreads - 1) / levelOneThreads;
-        long start = thread_id * pixelsPerThread + 1;
-        long end = min(start + pixelsPerThread - 1, totalPixels);
-        long pixelsRead = end - start + 1;
-
-        int local_status = 0; 
-        fits_read_img(fptr, TDOUBLE, start, pixelsRead, NULL, &image[start - 1], NULL, &local_status);
-
-        vector<long> localPixels;
-
-        for(int i = start - 1; i < end; i++){
+    {   
+        // extraction of pixels with value 255, generating its coordinates
+        vector<pair<int,int>> localPixels;
+        #pragma omp for
+        for(int i = 0; i < naxes[0]*naxes[1]; i++){
             if(image[i] == 255){
-                localPixels.push_back(i);
+                int x = i % naxes[0];
+                int y = i / naxes[0];
+                pair<int, int> pixel;
+                pixel.first = x;
+                pixel.second = y;
+                localPixels.push_back(pixel);
+            } 
+        }
+        #pragma omp critical // insert every pixel in vector pixels
+        pixels.insert(pixels.end(), localPixels.begin(), localPixels.end());
+
+        // Second parallel level - Hough algorithm
+        #pragma omp parallel num_threads(levelTwoThreads) shared(pixels, ellipses)
+        {
+            #pragma omp for
+            for(pair<int,int> pixel_t: pixels ){
+
+                #pragma omp for
+                for(pair<int, int> pixel_u : pixels){
+
+                    int vote[pixels.size()]; // array for betha votes
+
+                    float oX = getOx(pixel_t.first, pixel_u.first);
+                    float xY = getOy(pixel_t.second, pixel_u.second);
+                    float alpha = getAlpha(pixel_t.first, pixel_t.second, pixel_u.first, pixel_u.second);
+                    float theta = getTheta(pixel_t.first, pixel_t.second, pixel_u.first, pixel_u.second);
+
+                    #pragma omp for
+                    for(pair<int, int> pixel_k : pixels){
+                        
+                        if(pixel_k == pixel_t && pixel_k == pixel_u){
+                            continue;
+                        }
+
+                        
+
+
+                    }
+
+
+                }
+
             }
         }
 
-        #pragma omp critical
-        pixels.insert(pixels.end(), localPixels.begin(), localPixels.end());
+
+
 
     }
     
     cout << pixels.size() << endl;
 
-    // Cerrar el archivo FITS
+    // Close fits file
     if (fits_close_file(fptr, &status)) {
         fits_report_error(stderr, status);
         free(image);
         return status;
     }
 
-    // Imprimir cada pixel de la imagen
-    double num = 0;
-    #pragma omp parallel for num_threads(levelOneThreads) shared(num)
-    for (long i = 0; i < naxes[0] * naxes[1]; i++) {
-        #pragma omp critical
-        if(image[i] == 255){
-            // cout << "Pixel " << i << ": " << image[i] << endl;    
-            num = num + 1;
-        }
-    }
-    cout << num << endl;
-
-    // Liberar la memoria
     free(image);
 
     return 0;
