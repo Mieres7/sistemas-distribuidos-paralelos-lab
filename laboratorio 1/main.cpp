@@ -11,24 +11,32 @@ using namespace std;
 
 typedef struct Ellipse {
     float ox;
-    float xy;
+    float oy;
     float alpha;
     float betha;
     float tetha;
 };
 
 // Data functions
-float getOx(int tx, int ux) { return (tx + ux) / 2.0f; }
-float getOy(int ty, int uy) { return (ty + uy) / 2.0f; }
-float getAlpha(int tx, int ty, int ux, int uy) { return (sqrt(pow((ux - tx), 2) + pow((uy - ty), 2)) / 2.0f); }
-float getTheta(int tx, int ty, int ux, int uy) { return atan2((uy - ty),(ux - tx)); }
+double getOx(int tx, int ux) { return (tx + ux) / 2; }
+double getOy(int ty, int uy) { return (ty + uy) / 2; }
+double getAlpha(int tx, int ty, int ux, int uy) { return (sqrt(pow((ux - tx), 2) + pow((uy - ty), 2)) / 2.0f); }
+double getTheta(int tx, int ty, int ux, int uy) { return atan2((uy - ty),(ux - tx)); }
+double getDelta(int kx, int ky, int ox, int oy) { return sqrt(pow(ky-oy,2) + pow(kx-ox,2));}
+double getGamma(double theta, int kx, int ky, int ox, int oy){ return sin(theta) * (ky - oy) + cos(theta) * (kx - ox); }
+double getBetha(double alpha, double gamma, double delta) 
+{ 
+    return sqrt((pow(alpha, 2) * pow(delta,2) - (pow(alpha, 2) * pow(gamma, 2)))/ (pow(alpha, 2) - pow(gamma, 2))) ; 
+}
+
+
 
 int main(int argc, char **argv) {
 
     // terminal input
     int opt;
     char* filename = nullptr;
-    int alpha = 0, percentage = 0, betha = 0, levelOneThreads = 0, levelTwoThreads = 0;
+    int minAlpha = 0, percentage = 0, numberOfBethas = 0, levelOneThreads = 0, levelTwoThreads = 0;
 
     // get options
     while ((opt = getopt(argc, argv, "f:a:r:b:u:d:")) != -1) {
@@ -37,13 +45,13 @@ int main(int argc, char **argv) {
                 filename = optarg;
                 break;
             case 'a':
-                alpha = std::atoi(optarg);
+                minAlpha = std::atoi(optarg);
                 break;
             case 'r':
                 percentage = std::atoi(optarg);
                 break;
             case 'b':
-                betha = std::atoi(optarg);
+                numberOfBethas = std::atoi(optarg);
                 break;
             case 'u':
                 levelOneThreads = std::atoi(optarg);
@@ -98,6 +106,8 @@ int main(int argc, char **argv) {
 
     // Vector with found ellipses
     vector<Ellipse> ellipses;
+    // Delta Beta for discretizacion
+    double deltaBetha = naxes[0] / (2*numberOfBethas);
 
     // First parallel level - create edge list 
     omp_set_nested(0);
@@ -120,31 +130,53 @@ int main(int argc, char **argv) {
         pixels.insert(pixels.end(), localPixels.begin(), localPixels.end());
 
         // Second parallel level - Hough algorithm
-        #pragma omp parallel num_threads(levelTwoThreads) shared(pixels, ellipses)
+        #pragma omp parallel num_threads(levelTwoThreads) shared(pixels, ellipses, naxes, deltaBetha)
         {
             #pragma omp for
             for(pair<int,int> pixel_t: pixels ){
 
-                #pragma omp for
+                // #pragma omp for
                 for(pair<int, int> pixel_u : pixels){
 
-                    int vote[pixels.size()]; // array for betha votes
+                    // vector<int> votes; // array for betha votes
+                    vector<int> votes(pixels.size(), 0);
 
-                    float oX = getOx(pixel_t.first, pixel_u.first);
-                    float xY = getOy(pixel_t.second, pixel_u.second);
-                    float alpha = getAlpha(pixel_t.first, pixel_t.second, pixel_u.first, pixel_u.second);
-                    float theta = getTheta(pixel_t.first, pixel_t.second, pixel_u.first, pixel_u.second);
+                    double oX = getOx(pixel_t.first, pixel_u.first);
+                    double oY = getOy(pixel_t.second, pixel_u.second);
+                    double alpha = getAlpha(pixel_t.first, pixel_t.second, pixel_u.first, pixel_u.second);
+                    double theta = getTheta(pixel_t.first, pixel_t.second, pixel_u.first, pixel_u.second);
 
-                    #pragma omp for
+                    // #pragma omp for
                     for(pair<int, int> pixel_k : pixels){
                         
                         if(pixel_k == pixel_t && pixel_k == pixel_u){
                             continue;
                         }
 
-                        
+                        double delta = getDelta(pixel_k.first, pixel_k.second, oX, oY);
+                        double gamma = getGamma(theta, pixel_k.first, pixel_k.second, oX, oY);
+                        double betha = getBetha(alpha, gamma, delta);
 
+                        int bethaIndex = floor(betha / deltaBetha);
 
+                        // #pragma omp critical
+                        if (bethaIndex >= 0 && bethaIndex < votes.size()) {
+                            votes[bethaIndex]++;
+                        }
+                    
+                    }
+
+                    
+                    for(int i = 0; i < votes.size(); i++){
+                        Ellipse ep;
+                        ep.alpha = alpha;
+                        ep.betha = votes[i];
+                        ep.ox = oX;
+                        ep.oy = oY;
+                        ep.tetha = theta;
+
+                        #pragma omp critical
+                        ellipses.push_back(ep);
                     }
 
 
@@ -166,6 +198,8 @@ int main(int argc, char **argv) {
         free(image);
         return status;
     }
+
+    printf("%ld", ellipses.size());
 
     free(image);
 
