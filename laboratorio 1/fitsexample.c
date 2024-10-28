@@ -21,19 +21,19 @@ int main(int argc, char *argv[])
   fits_read_img(fptr, TDOUBLE, fpixel, naxes[0]*naxes[1], NULL, myimage, NULL, &status);
   printf("%.10e \n", myimage[1024*512+128]);
   
-  int i, j;
-  double max = -1.0e-6;
-  for (i=0; i < naxes[0]*naxes[1]; i++)
+  // int i, j;
+  // double max = -1.0e-6;
+  // for (i=0; i < naxes[0]*naxes[1]; i++)
 
-    // if(myimage[i] == 255){
-    //   printf("%d",i);
-    //   break;
-    // }
+  //   // if(myimage[i] == 255){
+  //   //   printf("%d",i);
+  //   //   break;
+  //   // }
 
-    if (myimage[i] > max)
-      max = myimage[i];
+  //   if (myimage[i] > max)
+  //     max = myimage[i];
       
-  printf("max = %f\n", myimage[12]);
+  // printf("max = %f\n", myimage[12]);
   
   exit(0);
   

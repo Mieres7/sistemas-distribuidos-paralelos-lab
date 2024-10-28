@@ -9,17 +9,15 @@
 using namespace std;
 
 
-typedef struct Ellipse {
-    float ox;
-    float oy;
-    float alpha;
-    float betha;
-    float tetha;
+
+struct Ellipse {
+    int ox, oy;
+    double  alpha ,betha, tetha;
 };
 
 // Data functions
-double getOx(int tx, int ux) { return (tx + ux) / 2; }
-double getOy(int ty, int uy) { return (ty + uy) / 2; }
+int getOx(int tx, int ux) { return (tx + ux) / 2; }
+int getOy(int ty, int uy) { return (ty + uy) / 2; }
 double getAlpha(int tx, int ty, int ux, int uy) { return (sqrt(pow((ux - tx), 2) + pow((uy - ty), 2)) / 2.0f); }
 double getTheta(int tx, int ty, int ux, int uy) { return atan2((uy - ty),(ux - tx)); }
 double getDelta(int kx, int ky, int ox, int oy) { return sqrt(pow(ky-oy,2) + pow(kx-ox,2));}
@@ -36,19 +34,19 @@ int main(int argc, char **argv) {
     // terminal input
     int opt;
     char* filename = nullptr;
-    int minAlpha = 0, percentage = 0, numberOfBethas = 0, levelOneThreads = 0, levelTwoThreads = 0;
+    int minAlpha = 0, relativeVote = 0, numberOfBethas = 0, levelOneThreads = 0, levelTwoThreads = 0;
 
     // get options
-    while ((opt = getopt(argc, argv, "f:a:r:b:u:d:")) != -1) {
+    while ((opt = getopt(argc, argv, "i:a:r:b:u:d:")) != -1) {
         switch (opt) {
-            case 'f':
+            case 'i':
                 filename = optarg;
                 break;
             case 'a':
                 minAlpha = std::atoi(optarg);
                 break;
             case 'r':
-                percentage = std::atoi(optarg);
+                relativeVote = std::atoi(optarg);
                 break;
             case 'b':
                 numberOfBethas = std::atoi(optarg);
@@ -63,7 +61,7 @@ int main(int argc, char **argv) {
                 std::cerr << "Unknown option: " << char(optopt) << std::endl;
                 return 1;
             default:
-                std::cerr << "Use: " << argv[0] << " -f <filename> -a <minimun alpha> -r <relative vote> -b <number of bethas> -u <number of threads 1> -d <number of threads 2>" << std::endl;
+                std::cerr << "Use: " << argv[0] << " -i <filename> -a <minimun alpha> -r <relative vote> -b <number of bethas> -u <number of threads 1> -d <number of threads 2>" << std::endl;
         }
     }
 
@@ -107,10 +105,12 @@ int main(int argc, char **argv) {
     // Vector with found ellipses
     vector<Ellipse> ellipses;
     // Delta Beta for discretizacion
-    double deltaBetha = naxes[0] / (2*numberOfBethas);
+    double deltaBetha = static_cast<double>(naxes[0]) / (2 * numberOfBethas);
+
+    
 
     // First parallel level - create edge list 
-    omp_set_nested(0);
+    omp_set_nested(1);
     #pragma omp parallel num_threads(levelOneThreads) shared(image, naxes, fptr, pixels)
     {   
         // extraction of pixels with value 255, generating its coordinates
@@ -124,13 +124,14 @@ int main(int argc, char **argv) {
                 pixel.first = x;
                 pixel.second = y;
                 localPixels.push_back(pixel);
+                // printf("%d\n", pixel.first);
             } 
         }
         #pragma omp critical // insert every pixel in vector pixels
         pixels.insert(pixels.end(), localPixels.begin(), localPixels.end());
 
         // Second parallel level - Hough algorithm
-        #pragma omp parallel num_threads(levelTwoThreads) shared(pixels, ellipses, naxes, deltaBetha)
+        #pragma omp parallel num_threads(levelTwoThreads) shared(pixels, ellipses, naxes, deltaBetha, minAlpha)
         {
             #pragma omp for
             for(pair<int,int> pixel_t: pixels ){
@@ -138,45 +139,52 @@ int main(int argc, char **argv) {
                 // #pragma omp for
                 for(pair<int, int> pixel_u : pixels){
 
-                    // vector<int> votes; // array for betha votes
-                    vector<int> votes(pixels.size(), 0);
+                    // array for betha votes
+                    vector<int> votes = vector<int>(numberOfBethas, 0);
 
-                    double oX = getOx(pixel_t.first, pixel_u.first);
-                    double oY = getOy(pixel_t.second, pixel_u.second);
+                    int oX = getOx(pixel_t.first, pixel_u.first);
+                    int oY = getOy(pixel_t.second, pixel_u.second);
                     double alpha = getAlpha(pixel_t.first, pixel_t.second, pixel_u.first, pixel_u.second);
                     double theta = getTheta(pixel_t.first, pixel_t.second, pixel_u.first, pixel_u.second);
 
-                    // #pragma omp for
+                    if(alpha <= minAlpha){continue;}
+
                     for(pair<int, int> pixel_k : pixels){
                         
-                        if(pixel_k == pixel_t && pixel_k == pixel_u){
-                            continue;
-                        }
+                        if(pixel_k == pixel_t || pixel_k == pixel_u){ continue; }
 
                         double delta = getDelta(pixel_k.first, pixel_k.second, oX, oY);
+                        if(delta > alpha){ continue; }
+
                         double gamma = getGamma(theta, pixel_k.first, pixel_k.second, oX, oY);
                         double betha = getBetha(alpha, gamma, delta);
+                        
 
-                        int bethaIndex = floor(betha / deltaBetha);
+                        if(isnan(betha) || betha <= 0 || betha > alpha){continue;}
 
-                        // #pragma omp critical
-                        if (bethaIndex >= 0 && bethaIndex < votes.size()) {
-                            votes[bethaIndex]++;
-                        }
-                    
+                        int bethaIndex = betha / deltaBetha;
+
+                        if (bethaIndex >= 0 && bethaIndex < numberOfBethas) { votes[bethaIndex]++; }
+
                     }
 
                     
-                    for(int i = 0; i < votes.size(); i++){
-                        Ellipse ep;
-                        ep.alpha = alpha;
-                        ep.betha = votes[i];
-                        ep.ox = oX;
-                        ep.oy = oY;
-                        ep.tetha = theta;
+                    #pragma omp critical
+                    for(size_t i = 0; i < votes.size(); i++){
+                        if(votes[i] > relativeVote){
 
-                        #pragma omp critical
-                        ellipses.push_back(ep);
+                            double b = i * deltaBetha;
+                            double circumference = M_PI * (3*(alpha + b) - sqrt((3*alpha + b) * (alpha + 3*b)));
+
+                            if(votes[i] > 0.4 * circumference){
+
+                                Ellipse ep = Ellipse{oX, oY, alpha, static_cast<double>(votes[i]),  theta};
+                                ellipses.insert(ellipses.end(), ep);
+                                cout << "Adding ellipse: alpha=" << alpha << ", betha=" << i << ", oX=" << oX << ", oY=" << oY << ", theta=" << theta << endl;
+                            }
+
+                            
+                         }
                     }
 
 
@@ -190,7 +198,8 @@ int main(int argc, char **argv) {
 
     }
     
-    cout << pixels.size() << endl;
+    
+    printf("ellipses found: %li", ellipses.size());
 
     // Close fits file
     if (fits_close_file(fptr, &status)) {
@@ -199,7 +208,7 @@ int main(int argc, char **argv) {
         return status;
     }
 
-    printf("%ld", ellipses.size());
+
 
     free(image);
 
