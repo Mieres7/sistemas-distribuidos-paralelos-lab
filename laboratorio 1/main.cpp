@@ -18,7 +18,7 @@ struct Ellipse {
 // Data functions
 int getOx(int tx, int ux) { return (tx + ux) / 2; }
 int getOy(int ty, int uy) { return (ty + uy) / 2; }
-double getAlpha(int tx, int ty, int ux, int uy) { return (sqrt(pow((ux - tx), 2) + pow((uy - ty), 2)) / 2.0f); }
+double getAlpha(int tx, int ty, int ux, int uy) { return (sqrt(pow((ux - tx), 2) + pow((uy - ty), 2)) / 2); }
 double getTheta(int tx, int ty, int ux, int uy) { return atan2((uy - ty),(ux - tx)); }
 double getDelta(int kx, int ky, int ox, int oy) { return sqrt(pow(ky-oy,2) + pow(kx-ox,2));}
 double getGamma(double theta, int kx, int ky, int ox, int oy){ return sin(theta) * (ky - oy) + cos(theta) * (kx - ox); }
@@ -34,7 +34,8 @@ int main(int argc, char **argv) {
     // terminal input
     int opt;
     char* filename = nullptr;
-    int minAlpha = 0, relativeVote = 0, numberOfBethas = 0, levelOneThreads = 0, levelTwoThreads = 0;
+    int minAlpha = 0, numberOfBethas = 0, levelOneThreads = 0, levelTwoThreads = 0;
+    float relativeVote = 0;
 
     // get options
     while ((opt = getopt(argc, argv, "i:a:r:b:u:d:")) != -1) {
@@ -46,7 +47,7 @@ int main(int argc, char **argv) {
                 minAlpha = std::atoi(optarg);
                 break;
             case 'r':
-                relativeVote = std::atoi(optarg);
+                relativeVote = std::atof(optarg);
                 break;
             case 'b':
                 numberOfBethas = std::atoi(optarg);
@@ -66,7 +67,7 @@ int main(int argc, char **argv) {
     }
 
     if (filename == nullptr) {
-        cerr << "Error: Debe proporcionar un nombre de archivo con -f." << endl;
+        cerr << "Error: Debe proporcionar un nombre de archivo con -i." << endl;
         return 1;
     }
 
@@ -106,7 +107,6 @@ int main(int argc, char **argv) {
     vector<Ellipse> ellipses;
     // Delta Beta for discretizacion
     double deltaBetha = static_cast<double>(naxes[0]) / (2 * numberOfBethas);
-
     
 
     // First parallel level - create edge list 
@@ -124,16 +124,15 @@ int main(int argc, char **argv) {
                 pixel.first = x;
                 pixel.second = y;
                 localPixels.push_back(pixel);
-                // printf("%d\n", pixel.first);
             } 
         }
         #pragma omp critical // insert every pixel in vector pixels
         pixels.insert(pixels.end(), localPixels.begin(), localPixels.end());
 
         // Second parallel level - Hough algorithm
-        #pragma omp parallel num_threads(levelTwoThreads) shared(pixels, ellipses, naxes, deltaBetha, minAlpha)
+        #pragma omp parallel num_threads(levelTwoThreads) shared(pixels, ellipses, naxes, deltaBetha, minAlpha, relativeVote)
         {
-            #pragma omp for
+            #pragma omp for 
             for(pair<int,int> pixel_t: pixels ){
 
                 // #pragma omp for
@@ -159,43 +158,29 @@ int main(int argc, char **argv) {
                         double gamma = getGamma(theta, pixel_k.first, pixel_k.second, oX, oY);
                         double betha = getBetha(alpha, gamma, delta);
                         
-
-                        if(isnan(betha) || betha <= 0 || betha > alpha){continue;}
+                        if(isnan(betha) || betha <= 0 || betha > alpha || alpha > (max(naxes[0], naxes[1])) / 2){ continue; }
 
                         int bethaIndex = betha / deltaBetha;
 
-                        if (bethaIndex >= 0 && bethaIndex < numberOfBethas) { votes[bethaIndex]++; }
-
+                        #pragma omp atomic
+                        votes[bethaIndex]++; 
+                        
                     }
-
                     
-                    #pragma omp critical
+                    #pragma omp critical                 
                     for(size_t i = 0; i < votes.size(); i++){
-                        if(votes[i] > relativeVote){
-
-                            double b = i * deltaBetha;
-                            double circumference = M_PI * (3*(alpha + b) - sqrt((3*alpha + b) * (alpha + 3*b)));
-
-                            if(votes[i] > 0.4 * circumference){
-
-                                Ellipse ep = Ellipse{oX, oY, alpha, static_cast<double>(votes[i]),  theta};
-                                ellipses.insert(ellipses.end(), ep);
-                                cout << "Adding ellipse: alpha=" << alpha << ", betha=" << i << ", oX=" << oX << ", oY=" << oY << ", theta=" << theta << endl;
-                            }
-
-                            
-                         }
+                        double b = i * deltaBetha;
+                        int circumference = M_PI * (3*(alpha + b) - sqrt((3*alpha + b) * (alpha + 3*b)));
+                        
+                        if(votes[i] > relativeVote * circumference){
+                            Ellipse ep = Ellipse{oX, oY, alpha, static_cast<double>(votes[i]),  theta};
+                            ellipses.insert(ellipses.end(), ep);
+                        }
                     }
-
-
+                    
                 }
-
             }
         }
-
-
-
-
     }
     
     
