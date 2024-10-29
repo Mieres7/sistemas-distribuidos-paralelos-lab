@@ -13,7 +13,7 @@ theta = float(sys.argv[5])
 
 fig, ax = plt.subplots()
 ax.set(xlim=(0, 255), ylim=(0, 255), aspect="equal")
-ellipse = Ellipse((o_x, o_y), major, minor, angle=-theta, alpha=1)
+ellipse = Ellipse((o_x, o_y), major, minor, angle=theta, alpha=1)
 ax.add_artist(ellipse)
 ellipse.set_edgecolor('k')
 ellipse.set_facecolor('w')
