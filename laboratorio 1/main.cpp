@@ -199,7 +199,6 @@ int main(int argc, char **argv) {
                         if(votes[i] > relativeVote * circumference){
                             Ellipse ep = Ellipse{oX, oY, alpha, i,  theta*(180/M_PI)};
                             ellipses.insert(ellipses.end(), ep);
-                            printf("%d %d %f %f %f\n", oX, oY, alpha, i*deltaBetha, theta*(180/M_PI));
                         }
                     }
                     
