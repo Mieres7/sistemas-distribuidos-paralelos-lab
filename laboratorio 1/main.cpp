@@ -5,6 +5,8 @@
 #include <omp.h>
 #include <fitsio.h>
 #include <vector>
+#include <unordered_set>
+#include <tuple>
 
 using namespace std;
 
@@ -27,7 +29,9 @@ double getBetha(double alpha, double gamma, double delta)
     return sqrt((pow(alpha, 2) * pow(delta,2) - (pow(alpha, 2) * pow(gamma, 2)))/ (pow(alpha, 2) - pow(gamma, 2))) ; 
 }
 
-
+size_t hashEllipse(int ox, int oy, double alpha, double theta) {
+    return std::hash<int>()(ox) ^ std::hash<int>()(oy) ^ std::hash<double>()(alpha) ^ std::hash<double>()(theta);
+}
 
 int main(int argc, char **argv) {
 
@@ -105,9 +109,11 @@ int main(int argc, char **argv) {
 
     // Vector with found ellipses
     vector<Ellipse> ellipses;
-    // Delta Beta for discretizacion
+    // Delta Betha for discretizacion
     double deltaBetha = static_cast<double>(naxes[0]) / (2 * numberOfBethas);
     
+
+    unordered_set<size_t> uniqueEllipses;
 
     // First parallel level - create edge list 
     omp_set_nested(1);
@@ -131,7 +137,10 @@ int main(int argc, char **argv) {
 
         // Second parallel level - Hough algorithm
         #pragma omp parallel num_threads(levelTwoThreads) shared(pixels, ellipses, naxes, deltaBetha, minAlpha, relativeVote)
-        {
+        {   
+
+            vector<Ellipse> localEllipses;
+
             #pragma omp for 
             for(pair<int,int> pixel_t: pixels ){
 
@@ -146,7 +155,23 @@ int main(int argc, char **argv) {
                     double alpha = getAlpha(pixel_t.first, pixel_t.second, pixel_u.first, pixel_u.second);
                     double theta = getTheta(pixel_t.first, pixel_t.second, pixel_u.first, pixel_u.second);
 
-                    if(alpha <= minAlpha){continue;}
+                    if (alpha <= minAlpha) continue;
+
+                    // Genera el hash de la elipse candidata
+                    size_t hashValue = hashEllipse(oX, oY, alpha, theta);
+                    bool isUnique = false;
+
+                    // Verificar y agregar a uniqueEllipses si es único
+                    #pragma omp critical
+                    {
+                        if (uniqueEllipses.find(hashValue) == uniqueEllipses.end()) {
+                            uniqueEllipses.insert(hashValue);  // Registrar como nueva elipse
+                            isUnique = true;
+                        }
+                    }
+
+                    // Solo procesar si la elipse es única
+                    if (!isUnique) continue;
 
                     for(pair<int, int> pixel_k : pixels){
                         
@@ -163,8 +188,7 @@ int main(int argc, char **argv) {
                         int bethaIndex = betha / deltaBetha;
 
                         #pragma omp atomic
-                        votes[bethaIndex]++; 
-                        
+                        votes[bethaIndex]++;    
                     }
                     
                     #pragma omp critical                 
@@ -173,7 +197,7 @@ int main(int argc, char **argv) {
                         int circumference = M_PI * (3*(alpha + b) - sqrt((3*alpha + b) * (alpha + 3*b)));
                         
                         if(votes[i] > relativeVote * circumference){
-                            Ellipse ep = Ellipse{oX, oY, alpha, static_cast<double>(votes[i]),  theta*(180/M_PI)};
+                            Ellipse ep = Ellipse{oX, oY, alpha, i,  theta*(180/M_PI)};
                             ellipses.insert(ellipses.end(), ep);
                             printf("%d %d %f %f %f\n", oX, oY, alpha, i*deltaBetha, theta*(180/M_PI));
                         }
@@ -185,7 +209,12 @@ int main(int argc, char **argv) {
     }
     
     
-    printf("ellipses found: %li", ellipses.size());
+    printf("ellipses found: %li \n", ellipses.size());
+    for (size_t i = 0; i < ellipses.size(); i++)
+    {
+        printf("%d %d %f %f %f \n", ellipses.at(i).ox,ellipses.at(i).oy,ellipses.at(i).alpha, ellipses.at(i).betha  , ellipses.at(i).tetha);
+    }
+    
 
     // Close fits file
     if (fits_close_file(fptr, &status)) {
